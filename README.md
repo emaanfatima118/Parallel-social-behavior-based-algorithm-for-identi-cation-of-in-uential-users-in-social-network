@@ -1,4 +1,3 @@
-````markdown
 # Parallel Social Behavior-Based Algorithm for Identification of Influential Users in Social Network
 
 This project implements a parallel graph algorithm based on the PSAIIM (Parallel Social Action and Interest-based Influence Maximization) framework, which identifies influential users in large-scale social networks by integrating structural and semantic data. The parallelization is performed using MPI, OpenMP, and METIS for scalable performance on clustered systems.
@@ -86,5 +85,3 @@ We use the [HIGGS Twitter Dataset](https://snap.stanford.edu/data/higgs-twitter.
 * Extend implementation to GPU using OpenCL.
 * Explore influence tracking across evolving (dynamic) networks.
 * Integrate real-time data collection from Twitter API.
-
----
