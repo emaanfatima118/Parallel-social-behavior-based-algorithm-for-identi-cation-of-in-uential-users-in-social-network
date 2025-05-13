@@ -16,7 +16,6 @@
 #include <filesystem>
 #include <set>
 
-// Custom hash for pair - needs to be defined before Graph
 struct pair_hash {
     template <class T1, class T2>
     std::size_t operator() (const std::pair<T1, T2>& p) const {
@@ -26,7 +25,6 @@ struct pair_hash {
     }
 };
 
-// Graph structure - needs to be defined before any functions that use it
 struct Graph {
     std::unordered_map<int, std::vector<int>> adjacency_list;
     std::unordered_map<std::pair<int, int>, double, pair_hash> semantic_weights;
@@ -34,7 +32,6 @@ struct Graph {
     std::vector<int> nodes;
 };
 
-// --- Helper: Cosine Similarity ---
 double cosine_similarity(const std::vector<int>& a, const std::vector<int>& b) {
     double dot = 0.0, norm_a = 0.0, norm_b = 0.0;
     for (size_t i = 0; i < std::min(a.size(), b.size()); ++i) {
@@ -45,7 +42,6 @@ double cosine_similarity(const std::vector<int>& a, const std::vector<int>& b) {
     return (norm_a > 0 && norm_b > 0) ? (dot / (std::sqrt(norm_a) * std::sqrt(norm_b))) : 0.0;
 }
 
-// Forward declarations
 std::vector<std::string> load_feature_names(const std::string& directory);
 bool load_facebook_data(const std::string& directory, Graph& graph);
 int influence_spread(const Graph& graph, int seed, double beta, std::mt19937& gen, 
@@ -58,11 +54,9 @@ std::vector<int> partition_graph(const Graph& graph, int num_parts);
 Graph create_subgraph(const Graph& full_graph, const std::vector<int>& node_partitions,
                     int partition_id, const std::vector<int>& nodes);
 
-// --- Load Feature Names ---
 std::vector<std::string> load_feature_names(const std::string& directory) {
     std::vector<std::string> feature_names;
 
-    // Try to find any featnames file
     for (const auto& entry : std::filesystem::directory_iterator(directory)) {
         std::string filename = entry.path().filename().string();
         if (filename.find(".featnames") != std::string::npos) {
@@ -77,7 +71,7 @@ std::vector<std::string> load_feature_names(const std::string& directory) {
                         feature_names.push_back(name);
                     }
                 }
-                break; // Found and loaded feature names
+                break; 
             }
         }
     }
@@ -85,15 +79,12 @@ std::vector<std::string> load_feature_names(const std::string& directory) {
     return feature_names;
 }
 
-// --- Load Facebook SNAP Data ---
 bool load_facebook_data(const std::string& directory, Graph& graph) {
     std::set<int> all_nodes;
 
-    // Process all edge files to build the complete graph
     for (const auto& entry : std::filesystem::directory_iterator(directory)) {
         std::string filename = entry.path().filename().string();
         
-        // Load edge files
         if (filename.find(".edges") != std::string::npos) {
             std::ifstream edge_stream(entry.path());
             if (!edge_stream) {
@@ -114,15 +105,12 @@ bool load_facebook_data(const std::string& directory, Graph& graph) {
         }
     }
 
-    // Convert set to vector for nodes
     graph.nodes.assign(all_nodes.begin(), all_nodes.end());
     std::sort(graph.nodes.begin(), graph.nodes.end());
 
-    // Process all feature files
     for (const auto& entry : std::filesystem::directory_iterator(directory)) {
         std::string filename = entry.path().filename().string();
         
-        // Load node features (skip ego features for simplicity)
         if (filename.find(".feat") != std::string::npos && filename.find(".egofeat") == std::string::npos) {
             std::ifstream feat_stream(entry.path());
             if (!feat_stream) {
@@ -149,22 +137,46 @@ bool load_facebook_data(const std::string& directory, Graph& graph) {
                 }
             }
         }
+        if (filename.find(".egofeat") != std::string::npos) {
+            std::ifstream egofeat_stream(entry.path());
+            if (!egofeat_stream) {
+                std::cerr << "Warning: Failed to open egofeat file: " << filename << std::endl;
+                continue;
+            }
+    
+            std::string basename = entry.path().filename().string();
+            int ego_id = std::stoi(basename.substr(0, basename.find(".")));
+    
+            std::string line;
+            while (std::getline(egofeat_stream, line)) {
+                std::istringstream iss(line);
+                std::vector<int> features;
+                int feat_val;
+                while (iss >> feat_val) {
+                    features.push_back(feat_val);
+                }
+    
+                if (!features.empty()) {
+                    graph.features[ego_id] = features;
+                }
+            }
+        }
+        
     }
-
-    // Compute semantic weights based on features
+    
     std::cout << "Computing semantic weights between nodes..." << std::endl;
     for (const auto& edge_pair : graph.adjacency_list) {
         int u = edge_pair.first;
         for (int v : edge_pair.second) {
-            if (u < v) { // Avoid duplicate calculations for undirected graph
+            if (u < v) { 
                 if (graph.features.count(u) && graph.features.count(v)) {
                     double sim = cosine_similarity(graph.features[u], graph.features[v]);
                     std::pair<int, int> edge1 = {u, v};
                     std::pair<int, int> edge2 = {v, u};
                     graph.semantic_weights[edge1] = sim;
-                    graph.semantic_weights[edge2] = sim; // Since it's undirected
+                    graph.semantic_weights[edge2] = sim; 
                 } else {
-                    // Default weight if features not available
+                   
                     std::pair<int, int> edge1 = {u, v};
                     std::pair<int, int> edge2 = {v, u};
                     graph.semantic_weights[edge1] = 0.5;
@@ -177,7 +189,7 @@ bool load_facebook_data(const std::string& directory, Graph& graph) {
     return !graph.nodes.empty();
 }
 
-// --- Influence Spread using Independent Cascade with Semantic Weights ---
+
 int influence_spread(const Graph& graph, int seed, double beta, std::mt19937& gen,
                     std::unordered_set<int>& influenced_nodes) {
     std::unordered_set<int> active = { seed };
@@ -194,8 +206,7 @@ int influence_spread(const Graph& graph, int seed, double beta, std::mt19937& ge
             for (int v : graph.adjacency_list.at(u)) {
                 if (active.count(v)) continue;
                 
-                // Use semantic weight to adjust activation probability
-                double weight = 0.5; // Default weight
+                double weight = 0.5; 
                 std::pair<int, int> edge = {u, v};
                 if (graph.semantic_weights.count(edge)) {
                     weight = graph.semantic_weights.at(edge);
@@ -216,7 +227,6 @@ int influence_spread(const Graph& graph, int seed, double beta, std::mt19937& ge
     return static_cast<int>(active.size());
 }
 
-// --- Calculate Influence Score for Candidate Seeds ---
 std::vector<std::pair<int, double>> calculate_influence(const Graph& graph, const std::vector<int>& candidates,
                                                   int num_simulations, double beta) {
     std::vector<std::pair<int, double>> influence_scores;
@@ -251,15 +261,12 @@ std::vector<std::pair<int, double>> calculate_influence(const Graph& graph, cons
 std::vector<int> serialize_graph(const Graph& graph) {
     std::vector<int> serialized;
 
-    // Store number of nodes
     serialized.push_back(graph.nodes.size());
 
-    // Store nodes
     for (int node : graph.nodes) {
         serialized.push_back(node);
     }
 
-    // Store adjacency list
     serialized.push_back(graph.adjacency_list.size());
     for (const auto& adj_pair : graph.adjacency_list) {
         serialized.push_back(adj_pair.first);
@@ -269,7 +276,7 @@ std::vector<int> serialize_graph(const Graph& graph) {
         }
     }
 
-    // Store features
+ 
     serialized.push_back(graph.features.size());
     for (const auto& feat_pair : graph.features) {
         serialized.push_back(feat_pair.first);
@@ -291,18 +298,15 @@ std::vector<int> serialize_graph(const Graph& graph) {
     return serialized;
 }
 
-// --- Deserialize Graph from MPI Communication ---
 Graph deserialize_graph(const std::vector<int>& serialized) {
     Graph graph;
     int idx = 0;
 
-    // Retrieve nodes
     int num_nodes = serialized[idx++];
     for (int i = 0; i < num_nodes; ++i) {
         graph.nodes.push_back(serialized[idx++]);
     }
 
-    // Retrieve adjacency list
     int num_adj_entries = serialized[idx++];
     for (int i = 0; i < num_adj_entries; ++i) {
         int node = serialized[idx++];
@@ -312,7 +316,6 @@ Graph deserialize_graph(const std::vector<int>& serialized) {
         }
     }
 
-    // Retrieve features
     int num_features = serialized[idx++];
     for (int i = 0; i < num_features; ++i) {
         int node = serialized[idx++];
@@ -324,7 +327,6 @@ Graph deserialize_graph(const std::vector<int>& serialized) {
         graph.features[node] = features;
     }
 
-    // Retrieve semantic weights
     int scale_factor = 10000;
     int num_weights = serialized[idx++];
     for (int i = 0; i < num_weights; ++i) {
@@ -338,16 +340,14 @@ Graph deserialize_graph(const std::vector<int>& serialized) {
     return graph;
 }
 
-// --- Partition Graph using METIS ---
 std::vector<int> partition_graph(const Graph& graph, int num_parts) {
-    idx_t nvtxs = graph.nodes.size(); // Number of vertices
+    idx_t nvtxs = graph.nodes.size(); 
 
     if (nvtxs == 0) {
         std::cerr << "Error: Empty graph cannot be partitioned." << std::endl;
         return std::vector<int>();
     }
 
-    // Create METIS adjacency structure
     std::vector<idx_t> xadj(nvtxs + 1);
     std::vector<idx_t> adjncy;
 
@@ -357,13 +357,12 @@ std::vector<int> partition_graph(const Graph& graph, int num_parts) {
         node_to_idx[graph.nodes[i]] = i;
     }
 
-    // Build CSR format for METIS
     xadj[0] = 0;
     for (size_t i = 0; i < graph.nodes.size(); ++i) {
         int node = graph.nodes[i];
         if (graph.adjacency_list.count(node)) {
             for (int neighbor : graph.adjacency_list.at(node)) {
-                if (node_to_idx.count(neighbor)) { // Make sure the neighbor is in our node list
+                if (node_to_idx.count(neighbor)) { 
                     adjncy.push_back(node_to_idx[neighbor]);
                 }
             }
@@ -371,20 +370,17 @@ std::vector<int> partition_graph(const Graph& graph, int num_parts) {
         xadj[i+1] = adjncy.size();
     }
 
-    // Set up METIS parameters
-    idx_t ncon = 1;  // Number of balancing constraints
-    idx_t nparts = num_parts; // Number of partitions
-    idx_t objval; // Stores the edge-cut
-    std::vector<idx_t> part(nvtxs); // Stores the partition assignment
+    idx_t ncon = 1; 
+    idx_t nparts = num_parts; 
+    idx_t objval; 
+    std::vector<idx_t> part(nvtxs); 
 
-    // Options for METIS
     idx_t options[METIS_NOPTIONS];
     METIS_SetDefaultOptions(options);
 
     std::cout << "Partitioning graph with METIS: " << nvtxs << " nodes, " 
               << adjncy.size() << " edges, " << num_parts << " partitions..." << std::endl;
 
-    // Call METIS to partition the graph
     int ret = METIS_PartGraphKway(&nvtxs, &ncon, xadj.data(), adjncy.data(), 
                                  NULL, NULL, NULL, &nparts, NULL, NULL, 
                                  options, &objval, part.data());
@@ -396,7 +392,6 @@ std::vector<int> partition_graph(const Graph& graph, int num_parts) {
 
     std::cout << "Graph partitioned successfully. Edge-cut: " << objval << std::endl;
 
-    // Map the partition back to original node IDs
     std::vector<int> node_partitions(graph.nodes.size());
     for (size_t i = 0; i < graph.nodes.size(); ++i) {
         node_partitions[i] = part[i];
@@ -405,12 +400,10 @@ std::vector<int> partition_graph(const Graph& graph, int num_parts) {
     return node_partitions;
 }
 
-// --- Create Subgraph for a Partition ---
 Graph create_subgraph(const Graph& full_graph, const std::vector<int>& node_partitions,
                     int partition_id, const std::vector<int>& nodes) {
     Graph subgraph;
 
-    // Add nodes that belong to this partition
     for (size_t i = 0; i < nodes.size(); ++i) {
         if (node_partitions[i] == partition_id) {
             int node = nodes[i];
@@ -474,7 +467,6 @@ int main(int argc, char** argv) {
         std::cout << "Data directory: " << data_directory << std::endl;
         std::cout << "Beta: " << beta << ", Num simulations: " << num_simulations << std::endl;
         
-        // Master process loads the full graph
         if (!load_facebook_data(data_directory, full_graph)) {
             std::cerr << "Failed to load Facebook data. Exiting." << std::endl;
             MPI_Abort(MPI_COMM_WORLD, 1);
@@ -485,7 +477,6 @@ int main(int argc, char** argv) {
                   << full_graph.adjacency_list.size() << " adjacency entries, "
                   << full_graph.features.size() << " nodes with features" << std::endl;
         
-        // Partition the graph
         node_partitions = partition_graph(full_graph, num_procs);
         if (node_partitions.empty()) {
             std::cerr << "Failed to partition graph. Exiting." << std::endl;
@@ -495,7 +486,6 @@ int main(int argc, char** argv) {
         
         std::cout << "Graph partitioned into " << num_procs << " parts" << std::endl;
         
-        // Create and distribute subgraphs
         for (int p = 0; p < num_procs; ++p) {
             Graph subgraph = create_subgraph(full_graph, node_partitions, p, full_graph.nodes);
             
@@ -518,7 +508,6 @@ int main(int argc, char** argv) {
             }
         }
     } else {
-        // Worker processes receive their subgraph
         int size;
         MPI_Recv(&size, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         
@@ -531,16 +520,12 @@ int main(int argc, char** argv) {
                   << full_graph.nodes.size() << " nodes" << std::endl;
     }
 
-    // Each process computes influence for its local nodes
     std::vector<std::pair<int, double>> local_influence = 
         calculate_influence(full_graph, full_graph.nodes, num_simulations, beta);
 
-    // Gather results to master
     if (rank == 0) {
-        // Master already has its results
         std::vector<std::pair<int, double>> all_influence = local_influence;
         
-        // Receive results from workers
         for (int p = 1; p < num_procs; ++p) {
             int size;
             MPI_Recv(&size, 1, MPI_INT, p, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -548,7 +533,6 @@ int main(int argc, char** argv) {
             std::vector<int> buffer(size);
             MPI_Recv(buffer.data(), size, MPI_INT, p, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             
-            // Deserialize influence scores
             int scale_factor = 1000000;
             for (int i = 0; i < size; i += 2) {
                 int node = buffer[i];
@@ -557,7 +541,6 @@ int main(int argc, char** argv) {
             }
         }
         
-        // Sort and print top seeds
         std::sort(all_influence.begin(), all_influence.end(), 
                   [](const auto& a, const auto& b) { return a.second > b.second; });
         
@@ -568,7 +551,6 @@ int main(int argc, char** argv) {
                       << all_influence[i].second << std::endl;
         }
         
-        // Save results to file
         std::ofstream result_file("top_influential_nodes.txt");
         if (result_file) {
             result_file << "Rank\tNode ID\tInfluence Score" << std::endl;
@@ -579,7 +561,6 @@ int main(int argc, char** argv) {
             std::cout << "Results saved to top_influential_nodes.txt" << std::endl;
         }
     } else {
-        // Workers send their results to master
         std::vector<int> buffer;
         int scale_factor = 1000000;
         
